@@ -8,6 +8,8 @@ body {
 }
 a {
   color: #bababa;
+  cursor: pointer;
+  text-decoration: underline;
 }
 p {
   margin: 0;
@@ -18,6 +20,7 @@ p {
   top: 10px;
   left: 10px;
   width: 340px;
+  max-height: calc(100% - 20px);
   background: #161512cc;
   overflow-y: auto;
   overflow-x: hidden;
@@ -31,6 +34,10 @@ p {
 }
 .replay {
   word-wrap: anywhere;
+}
+
+span.no_action, span.unknown {
+  color: red;
 }
 
 .team {
@@ -62,21 +69,28 @@ p {
 }
 
 ul {
-  margin: 0;
-  padding-left: 1em;
+  margin: 0.4em 0;
+  padding-left: 1.5em;
 }
 
 .map {
   width: 250px;
   float: left;
 }
-.map.no_action, .map.unknown {
+.map.no_action, .map.unknown{
   background: #901717;
 }
-.map .team {
-  cursor: pointer;
+.map a {
+  display: block;
+}
+.map a.team {
+  text-decoration: none;
 }
 .map .meta {
   height: 5em;
   font-size: 0.8em;
+}
+
+canvas {
+  cursor: crosshair;
 }

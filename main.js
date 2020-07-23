@@ -749,8 +749,27 @@ var Massim = (function (exports) {
 
     });
 
+    function compareAgent(a, b) {
+        if (a.team < b.team)
+            return -1;
+        else if (a.team > b.team)
+            return 1;
+        const suffixA = parseInt(a.name.replace(/^[^\d]*/, ''), 10);
+        const suffixB = parseInt(b.name.replace(/^[^\d]*/, ''), 10);
+        if (suffixA < suffixB)
+            return -1;
+        else if (suffixA > suffixB)
+            return 1;
+        if (a.name < b.name)
+            return -1;
+        else if (a.name > b.name)
+            return 1;
+        else
+            return 0;
+    }
+
     const teams = ['blue', 'green', '#ff1493', '#8b0000'];
-    const goalFill = 'rgba(255, 0, 0, 0.4)';
+    const goal = 'rgba(255, 0, 0, 0.4)';
     const obstacle = '#333';
     const board = '#00ffff';
     const blocks = ['#41470b', '#78730d', '#bab217', '#e3d682', '#b3a06f', '#9c7640', '#5a4c35'];
@@ -767,14 +786,20 @@ var Massim = (function (exports) {
                 },
             };
         }
+        selectedAgent() {
+            if (!this.root.vm.dynamic)
+                return;
+            return this.root.vm.dynamic.entities.find(a => a.id === this.vm.selected);
+        }
         select(pos) {
             if (pos && this.root.vm.dynamic) {
                 const agents = this.root.vm.dynamic.entities.filter(a => a.x == pos.x && a.y == pos.y);
-                agents.sort((a, b) => b.id - a.id);
+                agents.reverse(); // opposite of rendering order
                 if (agents.every(a => a.id !== this.vm.selected))
                     this.vm.selected = undefined;
+                const selected = this.selectedAgent();
                 for (const agent of agents) {
-                    if (this.vm.selected === undefined || agent.id < this.vm.selected) {
+                    if (!selected || compareAgent(selected, agent) > 0) {
                         this.vm.selected = agent.id;
                         this.root.redraw();
                         return;
@@ -827,7 +852,6 @@ var Massim = (function (exports) {
                         }).observe(elm);
                     const mouseup = (ev) => {
                         ev.preventDefault();
-                        console.log('mouseup', ev);
                         if (ctrl.vm.dragging && !ctrl.vm.dragging.started) {
                             const pos = eventPosition(ev) || ctrl.vm.dragging.first;
                             ctrl.select(ctrl.invPos(pos, elm.getBoundingClientRect()));
@@ -875,7 +899,6 @@ var Massim = (function (exports) {
             },
             on: (opts === null || opts === void 0 ? void 0 : opts.viewOnly) ? undefined : {
                 mousedown(ev) {
-                    console.log(ev);
                     if (ev.button !== undefined && ev.button !== 0)
                         return; // only left click
                     ev.preventDefault();
@@ -950,14 +973,12 @@ var Massim = (function (exports) {
         ctx.fillRect(0, 0, width, height);
         // draw grid
         const transform = ctrl.vm.transform;
-        if ((opts === null || opts === void 0 ? void 0 : opts.viewOnly) && ctrl.vm.selected && ctrl.root.vm.dynamic) {
+        const selectedAgent = ctrl.selectedAgent();
+        if ((opts === null || opts === void 0 ? void 0 : opts.viewOnly) && selectedAgent) {
             // auto center to selection
-            const agent = ctrl.root.vm.dynamic.entities.find(a => a.id === ctrl.vm.selected);
-            if (agent) {
-                transform.scale = Math.min(canvas.width, canvas.height) / (agent.vision * 2 + 3);
-                transform.x = canvas.width / 2 - (agent.x + 0.5) * transform.scale;
-                transform.y = canvas.height / 2 - (agent.y + 0.5) * transform.scale;
-            }
+            transform.scale = Math.min(canvas.width, canvas.height) / (selectedAgent.vision * 2 + 3);
+            transform.x = canvas.width / 2 - (selectedAgent.x + 0.5) * transform.scale;
+            transform.y = canvas.height / 2 - (selectedAgent.y + 0.5) * transform.scale;
         }
         ctx.translate(transform.x, transform.y);
         ctx.scale(transform.scale, transform.scale);
@@ -973,14 +994,12 @@ var Massim = (function (exports) {
         }
         if (ctrl.root.vm.static && ctrl.root.vm.dynamic) {
             const grid = ctrl.root.vm.static.grid;
-            const teams$1 = Object.keys(ctrl.root.vm.static.teams);
-            teams$1.sort();
             // terrain
             for (let y = ymin; y <= ymax; y++) {
                 for (let x = xmin; x <= xmax; x++) {
                     switch (ctrl.root.vm.dynamic.cells[mod(y, grid.height)][mod(x, grid.width)]) {
                         case 1: // GOAL
-                            ctx.fillStyle = goalFill;
+                            ctx.fillStyle = goal;
                             ctx.fillRect(x, y, 1, 1);
                             break;
                         case 2: // OBSTABLE
@@ -1041,8 +1060,9 @@ var Massim = (function (exports) {
                         ctx.moveTo(dx + agent.x, dy + agent.y + 0.5);
                         ctx.lineTo(dx + agent.x + 1, dy + agent.y + 0.5);
                         ctx.stroke();
-                        const color = teams[teams$1.indexOf(agent.team)];
-                        if (teams$1.indexOf(agent.team) == 0) {
+                        const teamIndex = ctrl.root.vm.teamNames.indexOf(agent.team);
+                        const color = teams[teamIndex];
+                        if (teamIndex === 0) {
                             ctx.lineWidth = 0.05;
                             const margin = (1 - 15 / 16 / Math.sqrt(2)) / 2;
                             const r = rect(1, dx + agent.x, dy + agent.y, margin);
@@ -1055,14 +1075,6 @@ var Massim = (function (exports) {
                         }
                         ctx.fillStyle = 'white';
                         ctx.fillText(shortName(agent), dx + agent.x + 0.5, dy + agent.y + 0.5);
-                        // attachables of selected agent
-                        if (agent.id === ctrl.vm.selected && agent.attached) {
-                            ctx.fillStyle = hover;
-                            for (const attached of agent.attached) {
-                                if (attached.x != agent.x || attached.y != agent.y)
-                                    ctx.fillRect(dx + attached.x, dy + attached.y, 1, 1);
-                            }
-                        }
                         // agent action
                         if (agent.action == 'clear' && agent.actionResult.indexOf('failed_') != 0) {
                             const x = dx + agent.x + parseInt(agent.actionParams[0], 10);
@@ -1070,6 +1082,15 @@ var Massim = (function (exports) {
                             ctx.lineWidth = 0.05;
                             ctx.strokeStyle = 'red';
                             drawArea(ctx, x, y, 1);
+                        }
+                    }
+                    // attachables of selected agent
+                    if (selectedAgent === null || selectedAgent === void 0 ? void 0 : selectedAgent.attached) {
+                        ctx.fillStyle = hover;
+                        for (const attached of selectedAgent.attached) {
+                            if (attached.x != selectedAgent.x || attached.y != selectedAgent.y) {
+                                ctx.fillRect(dx + attached.x, dy + attached.y, 1, 1);
+                            }
                         }
                     }
                     // clear events
@@ -1080,7 +1101,7 @@ var Massim = (function (exports) {
                     }
                     // hover
                     if (ctrl.root.vm.hover) {
-                        drawHover(ctx, ctrl.root.vm.static, ctrl.root.vm.dynamic, dx, dy, ctrl.root.vm.hover);
+                        drawHover(ctx, ctrl.root.vm.static, ctrl.root.vm.dynamic, ctrl.root.vm.teamNames, dx, dy, ctrl.root.vm.hover);
                     }
                 }
             }
@@ -1112,7 +1133,7 @@ var Massim = (function (exports) {
             }
         }
     }
-    function drawHover(ctx, st, world, dx, dy, hover$1) {
+    function drawHover(ctx, st, world, teamNames, dx, dy, hover$1) {
         if (hover$1.x < 0 || hover$1.x >= st.grid.width || hover$1.y < 0 || hover$1.y >= st.grid.height)
             return;
         ctx.beginPath();
@@ -1125,11 +1146,16 @@ var Massim = (function (exports) {
                 }
             }
         }
-        const teamNames = Object.keys(st.teams);
-        teamNames.sort();
+        ctx.lineWidth = 0.1;
+        if (world.taskboards)
+            for (const taskboard of world.taskboards) {
+                if (Math.abs(taskboard.x - hover$1.x) + Math.abs(taskboard.y - hover$1.y) <= 2) {
+                    ctx.strokeStyle = board;
+                    drawArea(ctx, dx + taskboard.x, dy + taskboard.y, 2);
+                }
+            }
         for (const agent of world.entities) {
             if (Math.abs(agent.x - hover$1.x) + Math.abs(agent.y - hover$1.y) <= agent.vision) {
-                ctx.lineWidth = 0.1;
                 ctx.strokeStyle = teams[teamNames.indexOf(agent.team)];
                 drawArea(ctx, dx + agent.x, dy + agent.y, 5);
             }
@@ -1213,7 +1239,8 @@ var Massim = (function (exports) {
         constructor(redraw, replayPath) {
             this.redraw = redraw;
             this.vm = {
-                'state': 'connecting',
+                state: 'connecting',
+                teamNames: [],
             };
             if (replayPath)
                 this.replay = new ReplayCtrl(this, replayPath);
@@ -1229,12 +1256,10 @@ var Massim = (function (exports) {
             ws.onmessage = (msg) => {
                 const data = JSON.parse(msg.data);
                 console.log(data);
-                if (data.grid) {
-                    data.blockTypes.sort();
-                    this.vm.static = data;
-                }
+                if (data.grid)
+                    this.setStatic(data);
                 else
-                    this.vm.dynamic = data;
+                    this.setDynamic(data);
                 this.redraw();
             };
             ws.onopen = () => {
@@ -1249,18 +1274,22 @@ var Massim = (function (exports) {
                 this.redraw();
             };
         }
+        setStatic(st) {
+            if (st) {
+                st.blockTypes.sort();
+                this.vm.teamNames = Object.keys(st.teams);
+                this.vm.teamNames.sort();
+            }
+            this.vm.static = st;
+        }
+        setDynamic(dynamic) {
+            if (dynamic)
+                dynamic.entities.sort(compareAgent);
+            this.vm.dynamic = dynamic;
+        }
         toggleMaps() {
             if (this.vm.dynamic && !this.maps.length) {
-                const agents = [...this.vm.dynamic.entities];
-                agents.sort((a, b) => {
-                    if (a.name < b.name)
-                        return -1;
-                    if (a.name > b.name)
-                        return 1;
-                    else
-                        return 0;
-                });
-                this.maps = agents.map(agent => {
+                this.maps = this.vm.dynamic.entities.map(agent => {
                     const ctrl = new MapCtrl(this);
                     ctrl.vm.selected = agent.id;
                     return ctrl;
@@ -1308,7 +1337,7 @@ var Massim = (function (exports) {
             xhr.open('GET', `${this.path}/static.json${this.suffix}`);
             xhr.onload = () => {
                 if (xhr.status === 200) {
-                    this.root.vm.static = JSON.parse(xhr.responseText);
+                    this.root.setStatic(JSON.parse(xhr.responseText));
                     this.setStep(this.step);
                 }
                 else {
@@ -1326,36 +1355,38 @@ var Massim = (function (exports) {
             // got from cache
             const entry = this.cache.get(step);
             if (entry) {
-                this.root.vm.dynamic = entry;
+                this.root.setDynamic(entry);
                 this.root.vm.state = (this.root.vm.dynamic && this.root.vm.dynamic.step == step) ? 'online' : 'connecting';
                 this.root.redraw();
                 return;
             }
+            const onerror = () => {
+                this.root.vm.state = 'error';
+                this.stop();
+                this.root.redraw();
+            };
             const group = step > 0 ? Math.floor(step / 5) * 5 : 0;
             const xhr = new XMLHttpRequest();
             xhr.open('GET', `${this.path}/${group}.json${this.suffix}`);
             xhr.onload = () => {
                 if (xhr.status === 200) {
-                    var response = JSON.parse(xhr.responseText);
-                    this.root.vm.dynamic = response[step];
-                    this.root.vm.state = (this.root.vm.dynamic && this.root.vm.dynamic.step == step) ? 'online' : 'connecting';
+                    const response = JSON.parse(xhr.responseText);
                     // write to cache
                     if (this.cache.size > 100)
                         this.cache.clear();
                     for (const s in response)
                         this.cache.set(parseInt(s, 10), response[s]);
+                    if (response[step]) {
+                        this.root.setDynamic(response[step]);
+                        this.root.vm.state = (this.root.vm.dynamic && this.root.vm.dynamic.step == step) ? 'online' : 'connecting';
+                        this.root.redraw();
+                        return;
+                    }
                 }
-                else {
-                    this.root.vm.state = 'error';
-                    this.stop();
-                }
-                this.root.redraw();
+                // status !== 200 or !response[step]
+                onerror();
             };
-            xhr.onerror = () => {
-                this.root.vm.state = 'error';
-                this.stop();
-                this.root.redraw();
-            };
+            xhr.onerror = onerror;
             xhr.send();
         }
         setStep(s) {
@@ -1489,17 +1520,18 @@ var Massim = (function (exports) {
         else
             return n + ' ' + singular + 's';
     }
-    function teams$1(st, world) {
-        const teamNames = Object.keys(st.teams);
-        teamNames.sort();
+    function teams$1(teamNames, world) {
         return teamNames.map((name, i) => h('div.team', {
             style: { background: teams[i] }
         }, `${name}: $${world.scores[name]}`));
     }
     function tasks(ctrl, st, world) {
-        const selectedTask = world.tasks.filter(t => t.name === ctrl.vm.taskName)[0];
+        const selectedTask = world.tasks.find(t => t.name === ctrl.vm.taskName);
         return [
             h('select', {
+                props: {
+                    value: ctrl.vm.taskName || '',
+                },
                 on: {
                     change: function (e) {
                         ctrl.vm.taskName = e.target.value;
@@ -1508,20 +1540,26 @@ var Massim = (function (exports) {
                 }
             }, [
                 h('option', {
-                    props: {
+                    attrs: {
                         value: ''
                     },
                 }, simplePlural(world.tasks.length, 'task')),
-                ...world.tasks.map(t => h('option', {
-                    props: {
-                        value: t.name
-                    },
-                }, `${t.reward}$ for ${t.name} until step ${t.deadline}`))
+                ...world.tasks.map(t => {
+                    const acceptedBy = world.entities.filter(a => a.acceptedTask === t.name).length;
+                    return h('option', {
+                        attrs: {
+                            value: t.name
+                        },
+                    }, [
+                        `${t.reward}$ for ${t.name} until step ${t.deadline}`,
+                        acceptedBy ? ` (${acceptedBy} accepted)` : undefined,
+                    ]);
+                }),
             ]),
-            ...(selectedTask ? taskDetails(st, selectedTask) : [])
+            ...(selectedTask ? taskDetails(ctrl, st, world, selectedTask) : [])
         ];
     }
-    function hover$1(world, pos) {
+    function hover$1(ctrl, st, world, pos) {
         if (!world.cells[pos.y])
             return;
         const terrain = world.cells[pos.y][pos.x];
@@ -1530,55 +1568,88 @@ var Massim = (function (exports) {
         // pos
         const r = [h('li', `x = ${pos.x}, y = ${pos.y}`)];
         // terrain
-        if (terrain === 0)
-            r.push(h('li', 'terrain: empty'));
-        else if (terrain === 1)
-            r.push(h('li', 'terrain: goal'));
+        if (terrain === 1)
+            r.push(h('li', ['terrain: ', h('span', {
+                    style: {
+                        background: goal,
+                    }
+                }, 'goal')]));
         else if (terrain === 2)
             r.push(h('li', 'terrain: obstacle'));
         // dispensers
         for (const dispenser of world.dispensers) {
             if (dispenser.x == pos.x && dispenser.y == pos.y) {
-                r.push(h('li', `dispenser: type = ${dispenser.type}`));
+                r.push(h('li', ['dispenser: type = ', blockSpan(st, dispenser.type)]));
             }
         }
         // task boards
         if (world.taskboards) {
-            for (const board of world.taskboards) {
-                if (board.x == pos.x && board.y == pos.y) {
-                    r.push(h('li', 'task board'));
+            for (const board$1 of world.taskboards) {
+                if (board$1.x == pos.x && board$1.y == pos.y) {
+                    r.push(h('li', h('span', {
+                        style: {
+                            background: board,
+                            color: 'black',
+                        }
+                    }, 'task board')));
                 }
             }
         }
         // blocks
         for (const block of world.blocks) {
             if (block.x == pos.x && block.y == pos.y) {
-                r.push(h('li', `block: type = ${block.type}`));
+                r.push(h('li', ['block: type = ', blockSpan(st, block.type)]));
             }
         }
         // agents
         for (const agent of world.entities) {
             if (agent.x == pos.x && agent.y == pos.y) {
-                r.push(h('li', agentDescription(agent)));
+                r.push(h('li', ['agent: ', ...agentDescription(ctrl, agent)]));
             }
         }
         return h('ul', r);
     }
-    function selected(world, selected) {
-        for (const agent of world.entities) {
-            if (agent.id === selected) {
-                return h('div', 'Selected ' + agentDescription(agent));
+    function blockSpan(st, type) {
+        return h('span', {
+            style: {
+                background: blocks[st.blockTypes.indexOf(type)],
+                color: 'white',
             }
-        }
-        return;
+        }, type);
     }
-    function agentDescription(agent) {
-        let description = `agent: name = ${agent.name}, team = ${agent.team}, energy = ${agent.energy}, ${agent.action}(…) = ${agent.actionResult}`;
+    function agentDescription(ctrl, agent) {
+        var _a;
+        const r = [
+            'name = ', h('span', {
+                style: {
+                    background: teams[ctrl.vm.teamNames.indexOf(agent.team)],
+                }
+            }, agent.name),
+            `, energy = ${agent.energy}`
+        ];
+        if (agent.action && agent.actionResult)
+            r.push(', ', h('span', {
+                class: {
+                    [agent.action]: true,
+                    [agent.actionResult]: true,
+                }
+            }, `${agent.action}(…) = ${agent.actionResult}`));
+        if ((_a = agent.attached) === null || _a === void 0 ? void 0 : _a.length)
+            r.push(`, ${agent.attached.length} attached`);
+        if (agent.acceptedTask)
+            r.push(', ', h('a', {
+                on: {
+                    click() {
+                        ctrl.vm.taskName = agent.acceptedTask;
+                        ctrl.redraw();
+                    }
+                }
+            }, agent.acceptedTask));
         if (agent.disabled)
-            description += ', disabled';
-        return description;
+            r.push(', disabled');
+        return r;
     }
-    function taskDetails(st, task) {
+    function taskDetails(ctrl, st, dynamic, task) {
         const xs = task.requirements.map(b => Math.abs(b.x));
         const ys = task.requirements.map(b => Math.abs(b.y));
         const width = 2 * Math.max(...xs) + 1;
@@ -1600,7 +1671,9 @@ var Massim = (function (exports) {
             drawBlocks(ctx, 0, 0, st, task.requirements);
             ctx.restore();
         };
-        return [h('canvas', {
+        const acceptedBy = dynamic.entities.filter(a => a.acceptedTask === task.name);
+        return [
+            h('canvas', {
                 props: {
                     width: elementWidth,
                     height: elementHeight
@@ -1609,7 +1682,23 @@ var Massim = (function (exports) {
                     insert: render,
                     update: (_, vnode) => render(vnode)
                 }
-            }), h('p', simplePlural(task.requirements.length, 'block'))];
+            }),
+            ...(acceptedBy.length ? [
+                h('p', `Accepted by ${simplePlural(acceptedBy.length, 'agent')}:`),
+                h('ul', acceptedBy.map(by => h('li', h('a', {
+                    style: {
+                        background: teams[ctrl.vm.teamNames.indexOf(by.team)],
+                    },
+                    on: {
+                        click() {
+                            ctrl.map.vm.selected = by.id;
+                            ctrl.redraw();
+                        }
+                    },
+                }, by.name)))),
+            ] : []),
+            h('p', simplePlural(task.requirements.length, 'block')),
+        ];
     }
     function disconnected() {
         return h('div.box', [
@@ -1623,6 +1712,7 @@ var Massim = (function (exports) {
         return child ? h('div.box', child) : undefined;
     }
     function overlay(ctrl) {
+        const selectedAgent = ctrl.map.selectedAgent();
         return h('div#overlay', [
             ctrl.vm.static && (ctrl.replay ? replay(ctrl.replay) : h('div.box', ctrl.vm.static.sim)),
             (ctrl.vm.state === 'error' || ctrl.vm.state === 'offline') ?
@@ -1633,9 +1723,10 @@ var Massim = (function (exports) {
                 h('div.box', [
                     `Step: ${ctrl.vm.dynamic.step} / ${ctrl.vm.static.steps - 1}`
                 ]) : undefined,
-            ctrl.vm.state === 'connecting' ? h('div.box', [h('div.loader', 'Loading ...')]) : undefined,
+            ctrl.vm.state === 'connecting' ? h('div.box', ['Connecting ...', h('div.loader')]) : undefined,
+            (ctrl.vm.state === 'online' && (!ctrl.vm.static || !ctrl.vm.dynamic)) ? h('div.box', ['Waiting ...', h('div.loader')]) : undefined,
             ...((ctrl.vm.state === 'online' && ctrl.vm.static && ctrl.vm.dynamic) ? [
-                h('div.box', teams$1(ctrl.vm.static, ctrl.vm.dynamic)),
+                h('div.box', teams$1(ctrl.vm.teamNames, ctrl.vm.dynamic)),
                 h('div.box', tasks(ctrl, ctrl.vm.static, ctrl.vm.dynamic)),
                 h('div.box', [
                     h('button', {
@@ -1644,8 +1735,8 @@ var Massim = (function (exports) {
                         }
                     }, ctrl.maps.length ? 'Global view' : 'Agent view'),
                 ]),
-                ctrl.map.vm.selected ? box(selected(ctrl.vm.dynamic, ctrl.map.vm.selected)) : undefined,
-                ctrl.vm.hover ? box(hover$1(ctrl.vm.dynamic, ctrl.vm.hover)) : undefined,
+                selectedAgent ? box(h('div', ['Selected agent: ', ...agentDescription(ctrl, selectedAgent)])) : undefined,
+                ctrl.vm.hover ? box(hover$1(ctrl, ctrl.vm.static, ctrl.vm.dynamic, ctrl.vm.hover)) : undefined,
             ] : [])
         ]);
     }
@@ -1659,14 +1750,11 @@ var Massim = (function (exports) {
     function allMaps(ctrl) {
         if (!ctrl.vm.static)
             return;
-        const teamNames = Object.keys(ctrl.vm.static.teams);
-        teamNames.sort();
         return h_1.h('div.maps', ctrl.maps.map(m => {
-            if (!ctrl.vm.dynamic)
-                return;
-            const agent = ctrl.vm.dynamic.entities.find(a => a.id === m.vm.selected);
+            const agent = m.selectedAgent();
             if (!agent)
                 return;
+            const acceptedTask = agent.acceptedTask;
             return h_1.h('div', {
                 class: (agent.action && agent.actionResult) ? {
                     'map': true,
@@ -1676,12 +1764,12 @@ var Massim = (function (exports) {
                     map: true,
                 },
             }, [
-                h_1.h('div.team', {
+                h_1.h('a.team', {
                     style: m.vm.selected === ctrl.map.vm.selected ? {
                         background: 'white',
                         color: 'black',
                     } : {
-                        background: teams[teamNames.indexOf(agent.team)],
+                        background: teams[ctrl.vm.teamNames.indexOf(agent.team)],
                     },
                     on: {
                         click() {
@@ -1696,7 +1784,15 @@ var Massim = (function (exports) {
                 }),
                 h_1.h('div.meta', [
                     h_1.h('div', `energy = ${agent.energy}`),
-                    h_1.h('div', `${agent.action}(…) = ${agent.actionResult}`),
+                    agent.action ? h_1.h('div', `${agent.action}(…) = ${agent.actionResult}`) : undefined,
+                    acceptedTask ? h_1.h('a', {
+                        on: {
+                            click() {
+                                ctrl.vm.taskName = acceptedTask;
+                                ctrl.redraw();
+                            }
+                        }
+                    }, agent.acceptedTask) : undefined,
                     agent.disabled ? h_1.h('div', 'disabled') : undefined,
                 ]),
             ]);
@@ -1737,26 +1833,8 @@ var Massim = (function (exports) {
         };
     }
 
-    function compare(a, b) {
-        if (a.team < b.team)
-            return -1;
-        else if (a.team > b.team)
-            return 1;
-        const suffixA = parseInt(a.name.replace(/^[^\d]*/, ''), 10);
-        const suffixB = parseInt(b.name.replace(/^[^\d]*/, ''), 10);
-        if (suffixA < suffixB)
-            return -1;
-        else if (suffixA > suffixB)
-            return 1;
-        if (a.name < b.name)
-            return -1;
-        else if (a.name > b.name)
-            return 1;
-        else
-            return 0;
-    }
     function view$1(data) {
-        data.entities.sort(compare);
+        data.entities.sort(compareAgent);
         const teams$1 = [];
         for (const entity of data.entities) {
             if (teams$1.indexOf(entity.team) == -1)
