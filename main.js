@@ -830,6 +830,17 @@ var Massim = (function (exports) {
             else
                 return p;
         }
+        zoom(center, factor) {
+            if (this.vm.transform.scale * factor < 10)
+                factor = 10 / this.vm.transform.scale;
+            if (this.vm.transform.scale * factor > 100)
+                factor = 100 / this.vm.transform.scale;
+            this.vm.transform = {
+                x: center[0] + (this.vm.transform.x - center[0]) * factor,
+                y: center[1] + (this.vm.transform.y - center[1]) * factor,
+                scale: this.vm.transform.scale * factor,
+            };
+        }
     }
     function mapView(ctrl, opts) {
         return h('canvas', {
@@ -851,7 +862,8 @@ var Massim = (function (exports) {
                             }
                         }).observe(elm);
                     const mouseup = (ev) => {
-                        ev.preventDefault();
+                        if (ctrl.vm.dragging)
+                            ev.preventDefault();
                         if (ctrl.vm.dragging && !ctrl.vm.dragging.started) {
                             const pos = eventPosition(ev) || ctrl.vm.dragging.first;
                             ctrl.select(ctrl.invPos(pos, elm.getBoundingClientRect()));
@@ -875,10 +887,33 @@ var Massim = (function (exports) {
                                 ctrl.root.setHover(inv);
                         }
                     };
+                    const mousedown = (ev) => {
+                        if (ev.button !== undefined && ev.button !== 0)
+                            return; // only left click
+                        if (ev.targetTouches !== undefined && ev.targetTouches.length !== 1)
+                            return; // only one finger
+                        ev.preventDefault();
+                        const pos = eventPosition(ev);
+                        if (pos)
+                            ctrl.vm.dragging = {
+                                first: pos,
+                                latest: pos,
+                                started: false,
+                            };
+                        requestAnimationFrame(() => render(ev.target, ctrl, opts, true));
+                    };
+                    const wheel = (ev) => {
+                        ev.preventDefault();
+                        ctrl.zoom([ev.offsetX, ev.offsetY], Math.pow(3 / 2, -ev.deltaY / (ev.deltaMode ? 6.25 : 100)));
+                        requestAnimationFrame(() => render(ev.target, ctrl, opts));
+                    };
                     elm.massim = {
                         unbinds: (opts === null || opts === void 0 ? void 0 : opts.viewOnly) ? [
                             unbindable(document, 'mousemove', mousemove, { passive: false }),
                         ] : [
+                            unbindable(elm, 'mousedown', mousedown, { passive: false }),
+                            unbindable(elm, 'touchstart', mousedown, { passive: false }),
+                            unbindable(elm, 'wheel', wheel, { passive: false }),
                             unbindable(document, 'mouseup', mouseup),
                             unbindable(document, 'touchend', mouseup),
                             unbindable(document, 'mousemove', mousemove, { passive: false }),
@@ -895,46 +930,6 @@ var Massim = (function (exports) {
                     if (unbinds)
                         for (const unbind of unbinds)
                             unbind();
-                },
-            },
-            on: (opts === null || opts === void 0 ? void 0 : opts.viewOnly) ? undefined : {
-                mousedown(ev) {
-                    if (ev.button !== undefined && ev.button !== 0)
-                        return; // only left click
-                    ev.preventDefault();
-                    const pos = eventPosition(ev);
-                    if (pos)
-                        ctrl.vm.dragging = {
-                            first: pos,
-                            latest: pos,
-                            started: false,
-                        };
-                    requestAnimationFrame(() => render(ev.target, ctrl, opts, true));
-                },
-                touchstart(ev) {
-                    ev.preventDefault();
-                    const pos = eventPosition(ev);
-                    if (pos)
-                        ctrl.vm.dragging = {
-                            first: pos,
-                            latest: pos,
-                            started: false,
-                        };
-                    requestAnimationFrame(() => render(ev.target, ctrl, opts, true));
-                },
-                wheel(ev) {
-                    ev.preventDefault();
-                    let zoom = Math.pow(3 / 2, -ev.deltaY / (ev.deltaMode ? 6.25 : 100));
-                    if (ctrl.vm.transform.scale * zoom < 10)
-                        zoom = 10 / ctrl.vm.transform.scale;
-                    if (ctrl.vm.transform.scale * zoom > 100)
-                        zoom = 100 / ctrl.vm.transform.scale;
-                    ctrl.vm.transform = {
-                        x: ev.offsetX + (ctrl.vm.transform.x - ev.offsetX) * zoom,
-                        y: ev.offsetY + (ctrl.vm.transform.y - ev.offsetY) * zoom,
-                        scale: ctrl.vm.transform.scale * zoom,
-                    };
-                    requestAnimationFrame(() => render(ev.target, ctrl, opts));
                 },
             },
         });
@@ -1028,53 +1023,59 @@ var Massim = (function (exports) {
                     ctx.stroke();
                     // dispensers
                     for (const dispenser of ctrl.root.vm.dynamic.dispensers) {
-                        ctx.lineWidth = 2 * 0.025;
-                        const r1 = rect(1, dx + dispenser.x, dy + dispenser.y, 0.025);
-                        const color = blocks[ctrl.root.vm.static.blockTypes.indexOf(dispenser.type) % blocks.length];
-                        drawBlock(ctx, r1, color, 'white', 'black');
-                        const r2 = rect(1, dx + dispenser.x, dy + dispenser.y, 4 * 0.025);
-                        drawBlock(ctx, r2, color, 'white', 'black');
-                        const r3 = rect(1, dx + dispenser.x, dy + dispenser.y, 8 * 0.025);
-                        drawBlock(ctx, r3, color, 'white', 'black');
-                        ctx.fillStyle = 'white';
-                        ctx.fillText(`[${dispenser.type}]`, dx + dispenser.x + 0.5, dy + dispenser.y + 0.5);
+                        if (visible(xmin, xmax, ymin, ymax, dispenser, dx, dy)) {
+                            ctx.lineWidth = 2 * 0.025;
+                            const r1 = rect(1, dx + dispenser.x, dy + dispenser.y, 0.025);
+                            const color = blocks[ctrl.root.vm.static.blockTypes.indexOf(dispenser.type) % blocks.length];
+                            drawBlock(ctx, r1, color, 'white', 'black');
+                            const r2 = rect(1, dx + dispenser.x, dy + dispenser.y, 4 * 0.025);
+                            drawBlock(ctx, r2, color, 'white', 'black');
+                            const r3 = rect(1, dx + dispenser.x, dy + dispenser.y, 8 * 0.025);
+                            drawBlock(ctx, r3, color, 'white', 'black');
+                            ctx.fillStyle = 'white';
+                            ctx.fillText(`[${dispenser.type}]`, dx + dispenser.x + 0.5, dy + dispenser.y + 0.5);
+                        }
                     }
                     // task boards
                     if (ctrl.root.vm.dynamic.taskboards) {
                         for (const board$1 of ctrl.root.vm.dynamic.taskboards) {
-                            ctx.lineWidth = 0.05;
-                            drawBlock(ctx, rect(1, dx + board$1.x, dy + board$1.y, 0.05), board, 'white', 'black');
+                            if (visible(xmin, xmax, ymin, ymax, board$1, dx, dy)) {
+                                ctx.lineWidth = 0.05;
+                                drawBlock(ctx, rect(1, dx + board$1.x, dy + board$1.y, 0.05), board, 'white', 'black');
+                            }
                         }
                     }
                     // blocks
-                    drawBlocks(ctx, dx, dy, ctrl.root.vm.static, ctrl.root.vm.dynamic.blocks);
+                    drawBlocks(ctx, dx, dy, ctrl.root.vm.static, ctrl.root.vm.dynamic.blocks.filter(b => visible(xmin, xmax, ymin, ymax, b, dx, dy)));
                     // agents
                     for (const agent of ctrl.root.vm.dynamic.entities) {
-                        ctx.lineWidth = 0.125;
-                        ctx.strokeStyle = 'black';
-                        ctx.beginPath();
-                        ctx.moveTo(dx + agent.x + 0.5, dy + agent.y);
-                        ctx.lineTo(dx + agent.x + 0.5, dy + agent.y + 1);
-                        ctx.stroke();
-                        ctx.beginPath();
-                        ctx.moveTo(dx + agent.x, dy + agent.y + 0.5);
-                        ctx.lineTo(dx + agent.x + 1, dy + agent.y + 0.5);
-                        ctx.stroke();
-                        const teamIndex = ctrl.root.vm.teamNames.indexOf(agent.team);
-                        const color = teams[teamIndex];
-                        if (teamIndex === 0) {
-                            ctx.lineWidth = 0.05;
-                            const margin = (1 - 15 / 16 / Math.sqrt(2)) / 2;
-                            const r = rect(1, dx + agent.x, dy + agent.y, margin);
-                            drawBlock(ctx, r, color, 'white', 'black');
+                        if (visible(xmin, xmax, ymin, ymax, agent, dx, dy)) {
+                            ctx.lineWidth = 0.125;
+                            ctx.strokeStyle = 'black';
+                            ctx.beginPath();
+                            ctx.moveTo(dx + agent.x + 0.5, dy + agent.y);
+                            ctx.lineTo(dx + agent.x + 0.5, dy + agent.y + 1);
+                            ctx.stroke();
+                            ctx.beginPath();
+                            ctx.moveTo(dx + agent.x, dy + agent.y + 0.5);
+                            ctx.lineTo(dx + agent.x + 1, dy + agent.y + 0.5);
+                            ctx.stroke();
+                            const teamIndex = ctrl.root.vm.teamNames.indexOf(agent.team);
+                            const color = teams[teamIndex];
+                            if (teamIndex === 0) {
+                                ctx.lineWidth = 0.05;
+                                const margin = (1 - 15 / 16 / Math.sqrt(2)) / 2;
+                                const r = rect(1, dx + agent.x, dy + agent.y, margin);
+                                drawBlock(ctx, r, color, 'white', 'black');
+                            }
+                            else {
+                                ctx.lineWidth = 0.04;
+                                const r = rect(1, dx + agent.x, dy + agent.y, 0.0625);
+                                drawRotatedBlock(ctx, r, color, 'white', 'black');
+                            }
+                            ctx.fillStyle = 'white';
+                            ctx.fillText(shortName(agent), dx + agent.x + 0.5, dy + agent.y + 0.5);
                         }
-                        else {
-                            ctx.lineWidth = 0.04;
-                            const r = rect(1, dx + agent.x, dy + agent.y, 0.0625);
-                            drawRotatedBlock(ctx, r, color, 'white', 'black');
-                        }
-                        ctx.fillStyle = 'white';
-                        ctx.fillText(shortName(agent), dx + agent.x + 0.5, dy + agent.y + 0.5);
                         // agent action
                         if (agent.action == 'clear' && agent.actionResult.indexOf('failed_') != 0) {
                             const x = dx + agent.x + parseInt(agent.actionParams[0], 10);
@@ -1119,6 +1120,9 @@ var Massim = (function (exports) {
         ctx.restore();
         if (vm.dragging && raf)
             requestAnimationFrame(() => render(canvas, ctrl, opts, true));
+    }
+    function visible(xmin, xmax, ymin, ymax, pos, dx, dy) {
+        return xmin <= pos.x + dx && pos.x + dx <= xmax && ymin <= pos.y + dy && pos.y + dy <= ymax;
     }
     function drawFogOfWar(ctx, st, dx, dy, agent) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
@@ -1743,11 +1747,11 @@ var Massim = (function (exports) {
 
     function view(ctrl) {
         return h_1.h('div#monitor', [
+            ctrl.maps.length ? agentView(ctrl) : mapView(ctrl.map),
             overlay(ctrl),
-            ctrl.maps.length > 0 ? allMaps(ctrl) : mapView(ctrl.map),
         ]);
     }
-    function allMaps(ctrl) {
+    function agentView(ctrl) {
         if (!ctrl.vm.static)
             return;
         return h_1.h('div.maps', ctrl.maps.map(m => {
