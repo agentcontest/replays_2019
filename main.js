@@ -775,6 +775,8 @@ var Massim = (function (exports) {
     const blocks = ['#41470b', '#78730d', '#bab217', '#e3d682', '#b3a06f', '#9c7640', '#5a4c35'];
     const hover = 'rgba(180, 180, 255, 0.4)';
 
+    const minScale = 10;
+    const maxScale = 100;
     class MapCtrl {
         constructor(root) {
             this.root = root;
@@ -831,10 +833,10 @@ var Massim = (function (exports) {
                 return p;
         }
         zoom(center, factor) {
-            if (this.vm.transform.scale * factor < 10)
-                factor = 10 / this.vm.transform.scale;
-            if (this.vm.transform.scale * factor > 100)
-                factor = 100 / this.vm.transform.scale;
+            if (this.vm.transform.scale * factor < minScale)
+                factor = minScale / this.vm.transform.scale;
+            if (this.vm.transform.scale * factor > maxScale)
+                factor = maxScale / this.vm.transform.scale;
             this.vm.transform = {
                 x: center[0] + (this.vm.transform.x - center[0]) * factor,
                 y: center[1] + (this.vm.transform.y - center[1]) * factor,
@@ -862,16 +864,32 @@ var Massim = (function (exports) {
                             }
                         }).observe(elm);
                     const mouseup = (ev) => {
-                        if (ctrl.vm.dragging)
+                        if (ctrl.vm.dragging || ctrl.vm.zooming)
                             ev.preventDefault();
                         if (ctrl.vm.dragging && !ctrl.vm.dragging.started) {
                             const pos = eventPosition(ev) || ctrl.vm.dragging.first;
                             ctrl.select(ctrl.invPos(pos, elm.getBoundingClientRect()));
                         }
                         ctrl.vm.dragging = undefined;
+                        ctrl.vm.zooming = undefined;
                     };
                     const mousemove = (ev) => {
+                        const zoom = eventZoom(ev);
+                        if (ctrl.vm.zooming && zoom) {
+                            ctrl.vm.transform = Object.assign({}, ctrl.vm.zooming.initialTransform);
+                            ctrl.zoom([
+                                (ctrl.vm.zooming.zoom.center[0] + zoom.center[0]) / 2,
+                                (ctrl.vm.zooming.zoom.center[1] + zoom.center[1]) / 2,
+                            ], zoom.distance / ctrl.vm.zooming.zoom.distance);
+                            ev.preventDefault();
+                            return;
+                        }
                         const pos = eventPosition(ev);
+                        if (pos) {
+                            const inv = ctrl.invPos(pos, elm.getBoundingClientRect());
+                            if (inv)
+                                ctrl.root.setHover(inv);
+                        }
                         if (ctrl.vm.dragging && pos) {
                             if (ctrl.vm.dragging.started || distanceSq(ctrl.vm.dragging.first, pos) > 20 * 20) {
                                 ctrl.vm.dragging.started = true;
@@ -881,26 +899,29 @@ var Massim = (function (exports) {
                             }
                             ev.preventDefault();
                         }
-                        else if (pos) {
-                            const inv = ctrl.invPos(pos, elm.getBoundingClientRect());
-                            if (inv)
-                                ctrl.root.setHover(inv);
-                        }
                     };
                     const mousedown = (ev) => {
                         if (ev.button !== undefined && ev.button !== 0)
                             return; // only left click
-                        if (ev.targetTouches !== undefined && ev.targetTouches.length !== 1)
-                            return; // only one finger
-                        ev.preventDefault();
                         const pos = eventPosition(ev);
-                        if (pos)
+                        const zoom = eventZoom(ev);
+                        if (zoom) {
+                            ctrl.vm.zooming = {
+                                initialTransform: Object.assign({}, ctrl.vm.transform),
+                                zoom,
+                            };
+                        }
+                        else if (pos) {
                             ctrl.vm.dragging = {
                                 first: pos,
                                 latest: pos,
                                 started: false,
                             };
-                        requestAnimationFrame(() => render(ev.target, ctrl, opts, true));
+                        }
+                        if (zoom || pos) {
+                            ev.preventDefault();
+                            requestAnimationFrame(() => render(ev.target, ctrl, opts, true));
+                        }
                     };
                     const wheel = (ev) => {
                         ev.preventDefault();
@@ -937,6 +958,18 @@ var Massim = (function (exports) {
     function unbindable(el, eventName, callback, options) {
         el.addEventListener(eventName, callback, options);
         return () => el.removeEventListener(eventName, callback, options);
+    }
+    function eventZoom(e) {
+        var _a;
+        if (((_a = e.targetTouches) === null || _a === void 0 ? void 0 : _a.length) !== 2)
+            return;
+        return {
+            center: [
+                (e.targetTouches[0].clientX + e.targetTouches[1].clientX) / 2,
+                (e.targetTouches[0].clientY + e.targetTouches[1].clientY) / 2
+            ],
+            distance: Math.max(20, Math.hypot(e.targetTouches[0].clientX - e.targetTouches[1].clientX, e.targetTouches[0].clientY - e.targetTouches[1].clientY))
+        };
     }
     function eventPosition(e) {
         var _a;
@@ -1118,8 +1151,9 @@ var Massim = (function (exports) {
             }
         }
         ctx.restore();
-        if (vm.dragging && raf)
+        if (raf && (vm.dragging || vm.zooming)) {
             requestAnimationFrame(() => render(canvas, ctrl, opts, true));
+        }
     }
     function visible(xmin, xmax, ymin, ymax, pos, dx, dy) {
         return xmin <= pos.x + dx && pos.x + dx <= xmax && ymin <= pos.y + dy && pos.y + dy <= ymax;
@@ -1285,6 +1319,20 @@ var Massim = (function (exports) {
                 this.vm.teamNames.sort();
             }
             this.vm.static = st;
+            this.resetTransform();
+        }
+        resetTransform() {
+            var _a;
+            const margin = 2;
+            const grid = (_a = this.vm.static) === null || _a === void 0 ? void 0 : _a.grid;
+            if (!grid)
+                return;
+            const scale = Math.max(minScale, Math.min(maxScale, Math.min(window.innerWidth, window.innerHeight) / (2 * margin + Math.max(grid.width, grid.height))));
+            this.map.vm.transform = {
+                x: (window.innerWidth - scale * (grid.width + 2 * margin)) / 2 + scale * margin,
+                y: (window.innerHeight - scale * (grid.height + 2 * margin)) / 2 + scale * margin,
+                scale,
+            };
         }
         setDynamic(dynamic) {
             if (dynamic)
@@ -1731,14 +1779,22 @@ var Massim = (function (exports) {
             (ctrl.vm.state === 'online' && (!ctrl.vm.static || !ctrl.vm.dynamic)) ? h('div.box', ['Waiting ...', h('div.loader')]) : undefined,
             ...((ctrl.vm.state === 'online' && ctrl.vm.static && ctrl.vm.dynamic) ? [
                 h('div.box', teams$1(ctrl.vm.teamNames, ctrl.vm.dynamic)),
-                h('div.box', tasks(ctrl, ctrl.vm.static, ctrl.vm.dynamic)),
                 h('div.box', [
                     h('button', {
                         on: {
                             click: () => ctrl.toggleMaps(),
                         }
                     }, ctrl.maps.length ? 'Global view' : 'Agent view'),
+                    ctrl.maps.length ? undefined : h('button', {
+                        on: {
+                            click() {
+                                ctrl.resetTransform();
+                                ctrl.redraw();
+                            }
+                        }
+                    }, 'Reset zoom'),
                 ]),
+                h('div.box', tasks(ctrl, ctrl.vm.static, ctrl.vm.dynamic)),
                 selectedAgent ? box(h('div', ['Selected agent: ', ...agentDescription(ctrl, selectedAgent)])) : undefined,
                 ctrl.vm.hover ? box(hover$1(ctrl, ctrl.vm.static, ctrl.vm.dynamic, ctrl.vm.hover)) : undefined,
             ] : [])
