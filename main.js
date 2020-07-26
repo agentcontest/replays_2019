@@ -770,6 +770,7 @@ var Massim = (function (exports) {
 
     const teams = ['blue', 'green', '#ff1493', '#8b0000'];
     const goal = 'rgba(255, 0, 0, 0.4)';
+    const goalOnLight = '#f58f8f';
     const obstacle = '#333';
     const board = '#00ffff';
     const blocks = ['#41470b', '#78730d', '#bab217', '#e3d682', '#b3a06f', '#9c7640', '#5a4c35'];
@@ -1058,15 +1059,15 @@ var Massim = (function (exports) {
                     for (const dispenser of ctrl.root.vm.dynamic.dispensers) {
                         if (visible(xmin, xmax, ymin, ymax, dispenser, dx, dy)) {
                             ctx.lineWidth = 2 * 0.025;
-                            const r1 = rect(1, dx + dispenser.x, dy + dispenser.y, 0.025);
                             const color = blocks[ctrl.root.vm.static.blockTypes.indexOf(dispenser.type) % blocks.length];
+                            const r1 = rect(1, dx + dispenser.x, dy + dispenser.y, 0.025);
                             drawBlock(ctx, r1, color, 'white', 'black');
-                            const r2 = rect(1, dx + dispenser.x, dy + dispenser.y, 4 * 0.025);
+                            const r2 = rect(1, dx + dispenser.x, dy + dispenser.y, 5 * 0.025);
                             drawBlock(ctx, r2, color, 'white', 'black');
-                            const r3 = rect(1, dx + dispenser.x, dy + dispenser.y, 8 * 0.025);
+                            const r3 = rect(1, dx + dispenser.x, dy + dispenser.y, 9 * 0.025);
                             drawBlock(ctx, r3, color, 'white', 'black');
                             ctx.fillStyle = 'white';
-                            ctx.fillText(`[${dispenser.type}]`, dx + dispenser.x + 0.5, dy + dispenser.y + 0.5);
+                            ctx.fillText(dispenser.type, dx + dispenser.x + 0.5, dy + dispenser.y + 0.5);
                         }
                     }
                     // task boards
@@ -1083,31 +1084,8 @@ var Massim = (function (exports) {
                     // agents
                     for (const agent of ctrl.root.vm.dynamic.entities) {
                         if (visible(xmin, xmax, ymin, ymax, agent, dx, dy)) {
-                            ctx.lineWidth = 0.125;
-                            ctx.strokeStyle = 'black';
-                            ctx.beginPath();
-                            ctx.moveTo(dx + agent.x + 0.5, dy + agent.y);
-                            ctx.lineTo(dx + agent.x + 0.5, dy + agent.y + 1);
-                            ctx.stroke();
-                            ctx.beginPath();
-                            ctx.moveTo(dx + agent.x, dy + agent.y + 0.5);
-                            ctx.lineTo(dx + agent.x + 1, dy + agent.y + 0.5);
-                            ctx.stroke();
                             const teamIndex = ctrl.root.vm.teamNames.indexOf(agent.team);
-                            const color = teams[teamIndex];
-                            if (teamIndex === 0) {
-                                ctx.lineWidth = 0.05;
-                                const margin = (1 - 15 / 16 / Math.sqrt(2)) / 2;
-                                const r = rect(1, dx + agent.x, dy + agent.y, margin);
-                                drawBlock(ctx, r, color, 'white', 'black');
-                            }
-                            else {
-                                ctx.lineWidth = 0.04;
-                                const r = rect(1, dx + agent.x, dy + agent.y, 0.0625);
-                                drawRotatedBlock(ctx, r, color, 'white', 'black');
-                            }
-                            ctx.fillStyle = 'white';
-                            ctx.fillText(shortName(agent), dx + agent.x + 0.5, dy + agent.y + 0.5);
+                            drawAgent(ctx, dx, dy, agent, teamIndex);
                         }
                         // agent action
                         if (agent.action == 'clear' && agent.actionResult.indexOf('failed_') != 0) {
@@ -1209,6 +1187,34 @@ var Massim = (function (exports) {
             height: blockSize - 2 * margin,
         };
     }
+    function drawAgent(ctx, dx, dy, agent, teamIndex) {
+        ctx.lineWidth = 0.125;
+        ctx.strokeStyle = 'black';
+        ctx.beginPath();
+        ctx.moveTo(dx + agent.x + 0.5, dy + agent.y);
+        ctx.lineTo(dx + agent.x + 0.5, dy + agent.y + 1);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(dx + agent.x, dy + agent.y + 0.5);
+        ctx.lineTo(dx + agent.x + 1, dy + agent.y + 0.5);
+        ctx.stroke();
+        const color = teams[teamIndex];
+        if (teamIndex === 0) {
+            ctx.lineWidth = 0.05;
+            const margin = (1 - 15 / 16 / Math.sqrt(2)) / 2;
+            const r = rect(1, dx + agent.x, dy + agent.y, margin);
+            drawBlock(ctx, r, color, 'white', 'black');
+        }
+        else {
+            ctx.lineWidth = 0.04;
+            const r = rect(1, dx + agent.x, dy + agent.y, 0.0625);
+            drawRotatedBlock(ctx, r, color, 'white', 'black');
+        }
+        if (agent.name) {
+            ctx.fillStyle = 'white';
+            ctx.fillText(shortAgentName(agent.name), dx + agent.x + 0.5, dy + agent.y + 0.5);
+        }
+    }
     function drawBlocks(ctx, dx, dy, st, blocks$1) {
         for (const block of blocks$1) {
             ctx.lineWidth = 0.05;
@@ -1268,9 +1274,9 @@ var Massim = (function (exports) {
         ctx.strokeStyle = dark;
         ctx.stroke();
     }
-    function shortName(agent) {
-        const match = agent.name.match(/^agent-?([A-Za-z])[A-Za-z-_]*([0-9]+)$/);
-        return match ? match[1] + match[2] : agent.name;
+    function shortAgentName(name) {
+        const match = name.match(/^agent-?[A-Za-z][A-Za-z-_]*([0-9]+)$/);
+        return match ? match[1] : name;
     }
 
     class Ctrl {
@@ -1603,7 +1609,7 @@ var Massim = (function (exports) {
                             value: t.name
                         },
                     }, [
-                        `${t.reward}$ for ${t.name} until step ${t.deadline}`,
+                        `$${t.reward} for ${t.name} until step ${t.deadline}`,
                         acceptedBy ? ` (${acceptedBy} accepted)` : undefined,
                     ]);
                 }),
@@ -1623,7 +1629,8 @@ var Massim = (function (exports) {
         if (terrain === 1)
             r.push(h('li', ['terrain: ', h('span', {
                     style: {
-                        background: goal,
+                        background: goalOnLight,
+                        color: 'black',
                     }
                 }, 'goal')]));
         else if (terrain === 2)
@@ -1687,7 +1694,7 @@ var Massim = (function (exports) {
                 }
             }, `${agent.action}(…) = ${agent.actionResult}`));
         if ((_a = agent.attached) === null || _a === void 0 ? void 0 : _a.length)
-            r.push(`, ${agent.attached.length} attached`);
+            r.push(`, ${agent.attached.length}\xa0attached`);
         if (agent.acceptedTask)
             r.push(', ', h('a', {
                 on: {
@@ -1716,10 +1723,7 @@ var Massim = (function (exports) {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.translate((elementWidth - gridSize) / 2, (elementHeight - gridSize) / 2);
             ctx.scale(gridSize, gridSize);
-            ctx.beginPath();
-            ctx.rect(0.4, 0.4, 0.2, 0.2);
-            ctx.fillStyle = 'red';
-            ctx.fill();
+            drawAgent(ctx, 0, 0, { x: 0, y: 0 }, 0);
             drawBlocks(ctx, 0, 0, st, task.requirements);
             ctx.restore();
         };
